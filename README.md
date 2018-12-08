@@ -19,6 +19,15 @@ Power
            13  14 - GND
 ```
 
+UART
+----
+
+```
+               06 - GND
+               08 - TxD (to CP2102 TXD)
+               10 - RxD (to CP2102 RXD)
+```
+
 SPI
 ---
 
