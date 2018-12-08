@@ -35,7 +35,7 @@ spidev_test: bin/spidev_test
 matrixclock: bin/matrixclock
 
 bin/spidev_test: src/spidev_test.c
-	makdir -p bin
+	mkdir -p bin
 	gcc -O2 -Wall -o $@ $^
 
 $(EXECUTABLE): $(OBJS) $(C_OBJS)
