@@ -10,7 +10,7 @@
  *
  * Cross-compile with cross-gcc -I/path/to/cross-kernel/include
  */
- 
+
 #include <stdint.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -20,21 +20,21 @@
 #include <sys/ioctl.h>
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
- 
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
- 
+
 static void pabort(const char *s)
 {
 	perror(s);
 	abort();
 }
- 
+
 static const char *device = "/dev/spidev1.1";
 static uint8_t mode;
 static uint8_t bits = 8;
 static uint32_t speed = 500000;
 static uint16_t delay;
- 
+
 static void transfer(int fd)
 {
 	int ret;
@@ -50,11 +50,11 @@ static void transfer(int fd)
 		.speed_hz = speed,
 		.bits_per_word = bits,
 	};
- 
+
 	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
 	if (ret < 1)
 		pabort("can't send spi message");
- 
+
 	for (ret = 0; ret < ARRAY_SIZE(tx); ret++) {
 		if (!(ret % 6))
 			puts("");
@@ -62,7 +62,7 @@ static void transfer(int fd)
 	}
 	puts("");
 }
- 
+
 static void print_usage(const char *prog)
 {
 	printf("Usage: %s [-DsbdlHOLC3]\n", prog);
@@ -78,7 +78,7 @@ static void print_usage(const char *prog)
 	     "  -3 --3wire    SI/SO signals shared\n");
 	exit(1);
 }
- 
+
 static void parse_opts(int argc, char *argv[])
 {
 	while (1) {
@@ -98,12 +98,12 @@ static void parse_opts(int argc, char *argv[])
 			{ NULL, 0, 0, 0 },
 		};
 		int c;
- 
+
 		c = getopt_long(argc, argv, "D:s:d:b:lHOLC3NR", lopts, NULL);
- 
+
 		if (c == -1)
 			break;
- 
+
 		switch (c) {
 		case 'D':
 			device = optarg;
@@ -147,59 +147,65 @@ static void parse_opts(int argc, char *argv[])
 		}
 	}
 }
- 
+
 int main(int argc, char *argv[])
 {
 	int ret = 0;
 	int fd;
- 
+
 	parse_opts(argc, argv);
- 
+
 	fd = open(device, O_RDWR);
 	if (fd < 0)
 		pabort("can't open device");
- 
+
 	/*
 	 * spi mode
 	 */
 	ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
 	if (ret == -1)
 		pabort("can't set spi mode");
- 
+
 	ret = ioctl(fd, SPI_IOC_RD_MODE, &mode);
 	if (ret == -1)
 		pabort("can't get spi mode");
- 
+
 	/*
 	 * bits per word
 	 */
+    uint8_t bitsOrig = 0;
+    ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bitsOrig);
+	if (ret == -1)
+		pabort("can't get bits per word");
+    printf("Current bits per word is: %d\n", bitsOrig)
+
 	ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
 	if (ret == -1)
 		pabort("can't set bits per word");
- 
+
 	ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits);
 	if (ret == -1)
 		pabort("can't get bits per word");
- 
+
 	/*
 	 * max speed hz
 	 */
 	ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
 	if (ret == -1)
 		pabort("can't set max speed hz");
- 
+
 	ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed);
 	if (ret == -1)
 		pabort("can't get max speed hz");
- 
+
 	printf("spi mode: %d\n", mode);
 	printf("bits per word: %d\n", bits);
 	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
- 
+
 	transfer(fd);
- 
+
 	close(fd);
- 
+
 	return ret;
 }
 
