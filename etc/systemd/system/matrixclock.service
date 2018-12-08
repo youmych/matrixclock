@@ -1,0 +1,13 @@
+[Unit]
+Description=4x4xN/MAX7219-based clock
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/matrixclock
+;StandardError=null
+Restart=always
+RestartSec=0
+
+[Install]
+WantedBy=multi-user.target
