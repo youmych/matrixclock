@@ -11,6 +11,13 @@
 #include <linux/spi/spidev.h>
 #include <sys/time.h>
 
+#include <array>
+#include <iostream>
+#include <algorithm>
+#include <system_error>
+#include <cerrno>
+#include <cassert>
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 #define BM(n) (0x01 << (n))
@@ -56,7 +63,7 @@ static void pabort(const char *s)
 
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
-static uint8_t bits = 16;
+static uint8_t bits = 8;
 static uint32_t speed = 5000000;
 static uint16_t delay;
 
@@ -64,17 +71,18 @@ static void Send_7219(int fd, uint8_t reg, uint8_t val)
 {
     int ret;
     uint8_t tx[] = {
-        reg, val
+        reg, val, reg, val, reg, val, reg, val
     };
     uint8_t rx[ARRAY_SIZE(tx)] = {0, };
-    struct spi_ioc_transfer tr = {
-        (unsigned long)tx, // .tx_buf
-        (unsigned long)rx, // .rx_buf
-        ARRAY_SIZE(tx),       // .len
-        delay,        // .delay_usecs
-        speed,           // .speed_hz
-        bits,       // .bits_per_word
-    };
+    struct spi_ioc_transfer tr; // = {
+    memset(&tr, 0, sizeof(tr));
+        tr.tx_buf = (unsigned long)tx; // .tx_buf
+        tr.rx_buf = (unsigned long)rx; // .rx_buf
+        tr.len = ARRAY_SIZE(tx);       // .len
+        tr.delay_usecs = delay;        // .delay_usecs
+        tr.speed_hz = speed;           // .speed_hz
+        tr.bits_per_word = bits;       // .bits_per_word
+    //};
 
     ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
     if (ret < 1)
@@ -87,6 +95,38 @@ static void Send_7219(int fd, uint8_t reg, uint8_t val)
     }
     puts("");
 #endif
+}
+
+static void send_buf_7219(int fd, const void* txbuf, size_t size)
+{
+    assert(size % 2 == 0);
+//    size &= (~0x01); 
+
+    struct spi_ioc_transfer tr; 
+    memset(&tr, 0, sizeof tr);
+    tr.tx_buf = (unsigned long)txbuf; // .tx_buf
+    tr.rx_buf = 0L;                 // .rx_buf
+    tr.len = size;                  // .len
+    tr.delay_usecs = delay;        // .delay_usecs
+    tr.speed_hz = speed;           // .speed_hz
+    tr.bits_per_word = bits;       // .bits_per_word
+
+    int ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+    if (ret < 1)
+        throw std::system_error(errno, std::system_category(), "can't send spi message");
+}
+
+static constexpr auto make_7219_transformer(uint8_t regAddr) 
+{
+    return [=](uint8_t data) -> uint16_t {
+        union { 
+            uint8_t rd[2];
+            uint16_t res;
+        } t;
+        t.rd[0] = regAddr;
+        t.rd[1] = data;
+        return t.res;
+    };
 }
 
 static void Clear_7219(int fd)
@@ -228,9 +268,10 @@ static const char* convert_to_7219(uint8_t* buf, size_t size, const char* sp)
 
 static void initialize(int fd)
 {
-    Send_7219(fd, 0x09, 0xFF);//включим режим декодирования
+    //Send_7219(fd, 0x09, 0xFF);//включим режим декодирования
+    Send_7219(fd, 0x09, 0x00);//выключим режим декодирования
     Send_7219(fd, 0x0B, 0x07);//кол-во используемых разрядов
-    Send_7219(fd, 0x0A, 0x04);//интенсивность свечения
+    Send_7219(fd, 0x0A, 0x01);//интенсивность свечения
     Send_7219(fd, 0x0C, 0x01);//включим индикатор
 
     Clear_7219(fd);
@@ -289,9 +330,58 @@ int main(int argc, char *argv[])
     initialize(fd);
 
     Send_7219(fd, 0x0F, 0x01);
-    usleep(100000);
+    usleep(100000*10L);
     Send_7219(fd, 0x0F, 0x00);
-    usleep(100000);
+    usleep(100000*10L);
+
+    std::array<uint16_t, 4> transform_buf;
+    std::array<uint8_t, 4> line1{ 0x55, 0x55, 0x55, 0x55 };
+    std::array<uint8_t, 4> line2{ 0xAA, 0xAA, 0xAA, 0xAA };
+
+    for(;;) {
+        
+        std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x01));
+        for(auto& v: transform_buf) {
+            std::cout << std::hex << v << ' ';
+        }
+        std::cout << std::endl;
+        send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
+
+        std::transform(line2.begin(), line2.end(), transform_buf.begin(), make_7219_transformer(0x02));
+        for(auto& v: transform_buf) {
+            std::cout << std::hex << v << ' ';
+        }
+        std::cout << std::endl;
+
+        send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
+
+        //Send_7219(fd, 0x01, 0x55);
+        //Send_7219(fd, 0x02, 0xAA);
+        Send_7219(fd, 0x03, 0x55);
+        Send_7219(fd, 0x04, 0xAA);
+        Send_7219(fd, 0x05, 0x55);
+        Send_7219(fd, 0x06, 0xAA);
+        Send_7219(fd, 0x07, 0x55);
+        Send_7219(fd, 0x08, 0xAA);
+        usleep(100000*10L);
+
+        std::transform(line2.begin(), line2.end(), transform_buf.begin(), make_7219_transformer(0x01));
+        send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
+
+        std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x02));
+        send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
+
+        //Send_7219(fd, 0x01, 0xAA);
+        //Send_7219(fd, 0x02, 0x55);
+        Send_7219(fd, 0x03, 0xAA);
+        Send_7219(fd, 0x04, 0x55);
+        Send_7219(fd, 0x05, 0xAA);
+        Send_7219(fd, 0x06, 0x55);
+        Send_7219(fd, 0x07, 0xAA);
+        Send_7219(fd, 0x08, 0x55);
+        usleep(100000*10L);
+
+    }
 
     demo(fd);
     demo(fd);
