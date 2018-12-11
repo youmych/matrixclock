@@ -56,7 +56,7 @@ static void pabort(const char *s)
 
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
-static uint8_t bits = 16;
+static uint8_t bits = 8; //16 - for odroid; 8 - for rpi ((
 static uint32_t speed = 5000000;
 static uint16_t delay;
 

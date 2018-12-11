@@ -177,7 +177,7 @@ int main(int argc, char *argv[])
     ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bitsOrig);
 	if (ret == -1)
 		pabort("can't get bits per word");
-    printf("Current bits per word is: %d\n", bitsOrig)
+    printf("Current bits per word is: %d\n", bitsOrig);
 
 	ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
 	if (ret == -1)
