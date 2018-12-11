@@ -18,6 +18,155 @@
 #include <cerrno>
 #include <cassert>
 
+namespace MAX7219 {
+
+/// Имена регистров и их адреса
+enum Reg : uint8_t {
+    NOP         = 0x00,
+
+    DIGIT_0     = 0x01,
+    DIGIT_1     = 0x02,
+    DIGIT_2     = 0x03,
+    DIGIT_3     = 0x04,
+    DIGIT_4     = 0x05,
+    DIGIT_5     = 0x06,
+    DIGIT_6     = 0x07,
+    DIGIT_7     = 0x08,
+
+    DECODE_MODE = 0x09,
+    INTENSIVITY = 0x0A,
+    SCAN_LIMIT  = 0x0B,
+    SHUTDOWN    = 0x0C,
+
+    DISPLAY_TEST = 0x0F
+};
+
+} // namespace MAX7219
+
+class SPI {
+public:
+    static constexpr uint8_t  DEFAULT_BITS_PER_WORD = 8;
+    static constexpr uint32_t DEFAULT_SPEED = 5000000;
+    static constexpr uint8_t  DEFAULT_DELAY = 0;
+
+    explicit SPI() {}
+    explicit SPI(const std::string& device,
+                 uint8_t mode,
+                 uint8_t bpw = DEFAULT_BITS_PER_WORD,
+                 uint32_t speed = DEFAULT_SPEED,
+                 uint8_t delay = DEFAULT_DELAY)
+        : m_Device(device), m_Mode(mode), m_Bits(bpw), m_Speed(speed), m_Delay(delay)
+    {
+        Open();
+    }
+
+    ~SPI() {
+        if( IsOpen() )
+            close(m_Fd);
+    }
+
+    void Open(const std::string& device,
+              uint8_t mode,
+              uint8_t bpw = DEFAULT_BITS_PER_WORD,
+              uint32_t speed = DEFAULT_SPEED,
+              uint8_t delay = DEFAULT_DELAY)
+    {
+        if( IsOpen() && m_Device == device && m_Mode == mode && m_Bits == bpw &&
+            m_Speed == speed && m_Delay == delay)
+        {
+            return;
+        }
+        if( IsOpen() ) { close(m_Fd); m_Fd = -1; }
+        m_Device = device;
+        m_Mode = mode;
+        m_Bits = bpw;
+        m_Speed = speed;
+        m_Delay = delay;
+        Open();
+    }
+
+    void Transfer(const void* buf, size_t len) {
+        struct spi_ioc_transfer tr;
+        memset(&tr, 0, sizeof(tr));
+        tr.tx_buf = (unsigned long)buf; // .tx_buf
+        tr.rx_buf = 0;                  // .rx_buf
+        tr.len = len;                   // .len
+        tr.delay_usecs = m_Delay;       // .delay_usecs
+        tr.speed_hz = m_Speed;          // .speed_hz
+        tr.bits_per_word = m_Bits;      // .bits_per_word
+
+        int ret = ioctl(m_Fd, SPI_IOC_MESSAGE(1), &tr);
+        if (ret < 1)
+            throw std::system_error(errno, std::system_category(), "can't send spi message");
+    }
+
+    bool IsOpen() const { return m_Fd != -1; }
+
+private:
+    void Open() {
+        m_Fd = open(m_Device.c_str(), O_RDWR);
+        if (m_Fd < 0)
+            throw std::system_error(errno, std::system_category(),
+                std::string("can't open device ") + m_Device);
+
+        // spi mode
+        int ret = ioctl(m_Fd, SPI_IOC_WR_MODE, &m_Mode);
+        if (ret == -1)
+            throw std::system_error(errno, std::system_category(),
+                std::string("can't set spi mode ") + std::to_string(m_Mode));
+
+        ret = ioctl(m_Fd, SPI_IOC_RD_MODE, &m_Mode);
+        if (ret == -1)
+            throw std::system_error(errno, std::system_category(), "can't get spi mode");
+
+        // bits per word
+        ret = ioctl(m_Fd, SPI_IOC_WR_BITS_PER_WORD, &m_Bits);
+        if (ret == -1)
+            throw std::system_error(errno, std::system_category(), "can't set bits per word");
+
+        ret = ioctl(m_Fd, SPI_IOC_RD_BITS_PER_WORD, &m_Bits);
+        if (ret == -1)
+            throw std::system_error(errno, std::system_category(), "can't get bits per word");
+
+        // max speed hz
+        ret = ioctl(m_Fd, SPI_IOC_WR_MAX_SPEED_HZ, &m_Speed);
+        if (ret == -1)
+            throw std::system_error(errno, std::system_category(), "can't set max speed hz");
+
+        ret = ioctl(m_Fd, SPI_IOC_RD_MAX_SPEED_HZ, &m_Speed);
+        if (ret == -1)
+            throw std::system_error(errno, std::system_category(), "can't get max speed hz");
+    }
+
+private:
+    std::string m_Device;
+    uint8_t m_Mode;
+    uint8_t m_Bits = 8; //16 - for odroid; 8 - for rpi ((
+    uint32_t m_Speed = 5000000;
+    uint8_t m_Delay = 0;
+    int m_Fd = -1;
+};
+
+static SPI g_SPI;
+
+class Display {
+public:
+    /// Кол-во точек по горизонтали в одном сегменте
+    static constexpr size_t SEG_X_POINTS = 8;
+    /// Кол-во точек по вертикали в одном сегменте
+    static constexpr size_t SEG_Y_POINTS = 8;
+    /// кол-во последовательно подключенных микросхем
+    static constexpr size_t IC_LINE_SIZE = 4;
+
+private:
+    /// Буфер для рендеринга максимум 8 строк.
+    /// MAX7219 соединены последовательно. Одна SPI-транзакция
+    /// должна записать по одному значению в каждый из N регистров.
+    /// Чтобы обновить все строки, нам нужно будет 8 транзакций.
+    std::array<uint16_t, IC_LINE_SIZE*SEG_Y_POINTS> m_RenderBuf;
+};
+
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 #define BM(n) (0x01 << (n))
