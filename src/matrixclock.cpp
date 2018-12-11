@@ -63,7 +63,7 @@ static void pabort(const char *s)
 
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
-static uint8_t bits = 8;
+static uint8_t bits = 8; //16 - for odroid; 8 - for rpi ((
 static uint32_t speed = 5000000;
 static uint16_t delay;
 
@@ -100,9 +100,9 @@ static void Send_7219(int fd, uint8_t reg, uint8_t val)
 static void send_buf_7219(int fd, const void* txbuf, size_t size)
 {
     assert(size % 2 == 0);
-//    size &= (~0x01); 
+//    size &= (~0x01);
 
-    struct spi_ioc_transfer tr; 
+    struct spi_ioc_transfer tr;
     memset(&tr, 0, sizeof tr);
     tr.tx_buf = (unsigned long)txbuf; // .tx_buf
     tr.rx_buf = 0L;                 // .rx_buf
@@ -116,10 +116,10 @@ static void send_buf_7219(int fd, const void* txbuf, size_t size)
         throw std::system_error(errno, std::system_category(), "can't send spi message");
 }
 
-static constexpr auto make_7219_transformer(uint8_t regAddr) 
+static constexpr auto make_7219_transformer(uint8_t regAddr)
 {
     return [=](uint8_t data) -> uint16_t {
-        union { 
+        union {
             uint8_t rd[2];
             uint16_t res;
         } t;
@@ -339,7 +339,7 @@ int main(int argc, char *argv[])
     std::array<uint8_t, 4> line2{ 0xAA, 0xAA, 0xAA, 0xAA };
 
     for(;;) {
-        
+
         std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x01));
         for(auto& v: transform_buf) {
             std::cout << std::hex << v << ' ';
@@ -520,7 +520,7 @@ static void demo(int fd)
     for(int i = 0; i < 8; i++)
         Send_7219(fd, i + 1, 0x00);
 
-    for(int i = 0; i < ARRAY_SIZE(prg1); i++) {
+    for(size_t i = 0; i < ARRAY_SIZE(prg1); i++) {
         Send_7219(fd, prg1[i].pos, prg1[i].val);
         if( prg1[i].delay ) {
             usleep(20000);
