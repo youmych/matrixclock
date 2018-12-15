@@ -17,6 +17,10 @@
 #include <system_error>
 #include <cerrno>
 #include <cassert>
+#include <vector>
+#include <iostream>
+#include <iterator>
+#include <bitset>
 
 namespace MAX7219 {
 
@@ -41,7 +45,65 @@ enum Reg : uint8_t {
     DISPLAY_TEST = 0x0F
 };
 
+/// Преобразование констант в строку
+const char* to_string(Reg r) {
+    #define TO_STRING( x ) case x: return #x;
+
+    switch( r ) {
+        TO_STRING(NOP);
+
+        TO_STRING(DIGIT_0);
+        TO_STRING(DIGIT_1);
+        TO_STRING(DIGIT_2);
+        TO_STRING(DIGIT_3);
+        TO_STRING(DIGIT_4);
+        TO_STRING(DIGIT_5);
+        TO_STRING(DIGIT_6);
+        TO_STRING(DIGIT_7);
+
+        TO_STRING(DECODE_MODE);
+        TO_STRING(INTENSIVITY);
+        TO_STRING(SCAN_LIMIT);
+        TO_STRING(SHUTDOWN);
+
+        TO_STRING(DISPLAY_TEST);
+
+        default: return "";
+    }
+
+    #undef TO_STRING
+}
+
+constexpr auto make_transformer(uint8_t regAddr)
+{
+    return [=](uint8_t data) -> uint16_t {
+        union {
+            uint8_t rd[2];
+            uint16_t res;
+        } t;
+        t.rd[0] = regAddr;
+        t.rd[1] = data;
+        return t.res;
+    };
+}
+
+constexpr auto make_cmd(uint8_t reg, uint8_t cmd)
+{
+    union T {
+        uint8_t rd[2];
+        uint16_t res;
+    } t = { reg, cmd };
+    return [=]() constexpr -> uint16_t {
+        return t.res;
+    };
+}
+
 } // namespace MAX7219
+
+std::ostream& operator<<(std::ostream& os, MAX7219::Reg r)
+{
+    return os << MAX7219::to_string(r);
+}
 
 class SPI {
 public:
@@ -49,7 +111,7 @@ public:
     static constexpr uint32_t DEFAULT_SPEED = 5000000;
     static constexpr uint8_t  DEFAULT_DELAY = 0;
 
-    explicit SPI() {}
+    explicit SPI() : m_Fd(-1) {}
     explicit SPI(const std::string& device,
                  uint8_t mode,
                  uint8_t bpw = DEFAULT_BITS_PER_WORD,
@@ -139,15 +201,13 @@ private:
     }
 
 private:
+    int m_Fd = -1;
     std::string m_Device;
     uint8_t m_Mode;
     uint8_t m_Bits = 8; //16 - for odroid; 8 - for rpi ((
     uint32_t m_Speed = 5000000;
     uint8_t m_Delay = 0;
-    int m_Fd = -1;
 };
-
-static SPI g_SPI;
 
 class Display {
 public:
@@ -158,7 +218,48 @@ public:
     /// кол-во последовательно подключенных микросхем
     static constexpr size_t IC_LINE_SIZE = 4;
 
+    Display(SPI& spi) : m_SPI(spi) {}
+
+    static void SendCmd(SPI& spi, MAX7219::Reg reg, uint8_t cmd) {
+        std::array<uint16_t, IC_LINE_SIZE> renderBuf;
+        std::generate(renderBuf.begin(), renderBuf.end(), MAX7219::make_cmd(reg, cmd));
+        spi.Transfer(renderBuf.data(), renderBuf.size()*sizeof(uint16_t));
+    }
+
+    static void Initialize(SPI& spi) {
+        SendCmd(spi, MAX7219::Reg::DECODE_MODE, 0x00);//выключим режим декодирования
+        SendCmd(spi, MAX7219::Reg::SCAN_LIMIT,  0x07);//кол-во используемых разрядов
+        SendCmd(spi, MAX7219::Reg::INTENSIVITY, 0x01);//интенсивность свечения
+        SendCmd(spi, MAX7219::Reg::SHUTDOWN,    0x01);//включим индикатор
+    }
+
+    void Initialize() {
+        Initialize(m_SPI);
+        Clear();
+    }
+
+    void Fill(uint8_t val = 0x00) {
+        for(uint8_t i = MAX7219::DIGIT_0; i < MAX7219::DIGIT_7; ++i) {
+            std::generate(m_RenderBuf.begin() + IC_LINE_SIZE*i,
+                          m_RenderBuf.begin() + IC_LINE_SIZE*(i+1),
+                          MAX7219::make_cmd(i, val));
+        }
+        Transfer();
+    }
+
+    void Clear() { Fill(); }
+
+    void Transfer() {
+        for(auto it = m_RenderBuf.begin(); it != m_RenderBuf.end(); it = std::next(it, IC_LINE_SIZE)) {
+            m_SPI.Transfer( &(*it), IC_LINE_SIZE*sizeof(uint16_t) );
+        }
+    }
+
+    // void Grab(const uint8_t* buf, int w, int h, int x, int y) {
+
+    // }
 private:
+    SPI& m_SPI;
     /// Буфер для рендеринга максимум 8 строк.
     /// MAX7219 соединены последовательно. Одна SPI-транзакция
     /// должна записать по одному значению в каждый из N регистров.
@@ -167,41 +268,116 @@ private:
 };
 
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+class VScreenRowIterotor {
+    using iterator = std::vector<uint8_t>::const_iterator;
+    using difference_type = std::vector<uint8_t>::difference_type;
+public:
+    explicit VScreenRowIterotor(iterator begin, difference_type line_size)
+        : m_Begin(begin)
+        , m_Length(line_size)
+        {}
 
-#define BM(n) (0x01 << (n))
+    auto operator*() const {
+        return std::make_pair(m_Begin, std::next(m_Begin, m_Length));
+    }
 
-enum {
-    SEG_A = BM(6),
-    SEG_B = BM(5),
-    SEG_C = BM(4),
-    SEG_D = BM(3),
-    SEG_E = BM(2),
-    SEG_F = BM(1),
-    SEG_G = BM(0),
-    DP    = BM(7),
-    BLANK = 0x00,
-    FONT_0 = (SEG_A | SEG_B | SEG_D | SEG_E | SEG_F),
-    FONT_1 = (SEG_B | SEG_C ),
-    FONT_2 = (SEG_A | SEG_B | SEG_G | SEG_E | SEG_D),
-    FONT_3 = (SEG_A | SEG_B | SEG_C | SEG_D | SEG_G),
-    FONT_4 = (SEG_B | SEG_B | SEG_C | SEG_F | SEG_G),
-    FONT_5 = (SEG_A | SEG_C | SEG_D | SEG_F | SEG_G),
-    FONT_6 = (SEG_A | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G),
-    FONT_7 = (SEG_A | SEG_B | SEG_C),
-    FONT_8 = (SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G),
-    FONT_9 = (SEG_A | SEG_B | SEG_C | SEG_D | SEG_F | SEG_G),
-    FONT_MINUS = SEG_G,
-    FONT_E = 0x00,
-    FONT_H = 0x00,
-    FONT_L = 0x00,
-    FONT_P = 0x00,
-    FONT_SPACE = 0x00
+    VScreenRowIterotor& operator++() {
+        std::advance(m_Begin, m_Length);
+        return *this;
+    }
+
+    bool operator != (const VScreenRowIterotor& other) const {
+        return m_Begin != other.m_Begin;
+    }
+
+private:
+    iterator m_Begin;
+    difference_type m_Length;
 };
 
-static const uint8_t font[] = {
-    FONT_0, FONT_1, FONT_2, FONT_3, FONT_4, FONT_5, FONT_6, FONT_7, FONT_8, FONT_9,
-    FONT_MINUS, FONT_E, FONT_H, FONT_L, FONT_P, FONT_SPACE
+
+class VScreen {
+public:
+    using size_type = unsigned int;
+
+    explicit VScreen(size_t w = 8*4, size_t h = 8)
+        : m_Width(aligned(w))
+        , m_Height(aligned(h))
+        , m_Ddata(m_Width * m_Height / 8, 0)
+    {}
+
+    size_type width() const { return m_Width; }
+    size_type height() const { return m_Height; }
+    size_t sizeBytes() const { return m_Ddata.size(); }
+
+    void putPixel(size_type x, size_type y, bool val = 1) {
+        if( x >= width() || y >= height() )
+            return;
+        if( val )
+            m_Ddata[ offset(x, y) ] |= bitMask(x % 8);
+        else
+            m_Ddata[ offset(x, y) ] &= ~bitMask(x % 8);
+    }
+
+    void clear() {
+        std::fill(m_Ddata.begin(), m_Ddata.end(), 0);
+    }
+
+    void fill(uint8_t val) {
+        std::fill(m_Ddata.begin(), m_Ddata.end(), val);
+    }
+
+    class Rows {
+        friend class VScreen;
+
+        const std::vector<uint8_t>& m_Data;
+        size_type m_LineLenght;
+
+        explicit Rows(const std::vector<uint8_t>& data, size_type lineLength)
+            : m_Data(data), m_LineLenght(lineLength)
+        {}
+    public:
+
+        Rows(const Rows&) = default;
+        Rows(Rows&&) = default;
+
+        VScreenRowIterotor begin() const {
+            return VScreenRowIterotor(m_Data.cbegin(), m_LineLenght);
+        }
+
+        VScreenRowIterotor end() const {
+            return VScreenRowIterotor(m_Data.cend(), 0);
+        }
+    };
+
+    Rows rows() const {
+        return Rows{this->m_Ddata, width() / 8};
+    }
+
+private:
+    static constexpr uint8_t bitMask(uint8_t bit) {
+        return (0x01 << (bit & 0x07));
+    }
+
+    auto rowBegin(size_type y) const {
+        return m_Ddata.begin() + width()*y/8;
+    }
+
+    size_type offset(size_type x, size_type y) const {
+        return (width() * y + x) / 8;
+    }
+
+    static size_type aligned(size_type sz) {
+        return ((sz / 8) + (sz % 8 > 0 ? 1 : 0)) * 8;
+    }
+
+private:
+    /// Ширина экрана в пикселях
+    size_type m_Width;
+    /// Высота экрана в пикселях
+    size_type m_Height;
+    /// Буфер экрана. Размер всегда кратен 8х8
+    std::vector<uint8_t> m_Ddata;
 };
 
 static void pabort(const char *s)
@@ -215,76 +391,6 @@ static uint8_t mode;
 static uint8_t bits = 8; //16 - for odroid; 8 - for rpi ((
 static uint32_t speed = 5000000;
 static uint16_t delay;
-
-static void Send_7219(int fd, uint8_t reg, uint8_t val)
-{
-    int ret;
-    uint8_t tx[] = {
-        reg, val, reg, val, reg, val, reg, val
-    };
-    uint8_t rx[ARRAY_SIZE(tx)] = {0, };
-    struct spi_ioc_transfer tr; // = {
-    memset(&tr, 0, sizeof(tr));
-        tr.tx_buf = (unsigned long)tx; // .tx_buf
-        tr.rx_buf = (unsigned long)rx; // .rx_buf
-        tr.len = ARRAY_SIZE(tx);       // .len
-        tr.delay_usecs = delay;        // .delay_usecs
-        tr.speed_hz = speed;           // .speed_hz
-        tr.bits_per_word = bits;       // .bits_per_word
-    //};
-
-    ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
-    if (ret < 1)
-        pabort("can't send spi message");
-#if 0
-    for (ret = 0; ret < ARRAY_SIZE(tx); ret++) {
-        if (!(ret % 6))
-            puts("");
-        printf("%.2X ", rx[ret]);
-    }
-    puts("");
-#endif
-}
-
-static void send_buf_7219(int fd, const void* txbuf, size_t size)
-{
-    assert(size % 2 == 0);
-//    size &= (~0x01);
-
-    struct spi_ioc_transfer tr;
-    memset(&tr, 0, sizeof tr);
-    tr.tx_buf = (unsigned long)txbuf; // .tx_buf
-    tr.rx_buf = 0L;                 // .rx_buf
-    tr.len = size;                  // .len
-    tr.delay_usecs = delay;        // .delay_usecs
-    tr.speed_hz = speed;           // .speed_hz
-    tr.bits_per_word = bits;       // .bits_per_word
-
-    int ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
-    if (ret < 1)
-        throw std::system_error(errno, std::system_category(), "can't send spi message");
-}
-
-static constexpr auto make_7219_transformer(uint8_t regAddr)
-{
-    return [=](uint8_t data) -> uint16_t {
-        union {
-            uint8_t rd[2];
-            uint16_t res;
-        } t;
-        t.rd[0] = regAddr;
-        t.rd[1] = data;
-        return t.res;
-    };
-}
-
-static void Clear_7219(int fd)
-{
-    for(int i=0; i<8; i++) {
-        Send_7219(fd, i+1, 0x0F);
-    }
-}
-
 
 static void print_usage(const char *prog)
 {
@@ -371,310 +477,139 @@ static void parse_opts(int argc, char *argv[])
     }
 }
 
-static inline uint8_t to_font_7219(char ch) {
-    switch(ch) {
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7':
-        case '8':
-        case '9':
-            return (ch - '0');
-            return (ch - 'a' + 0x0A);
-        case ':':
-        case '-':
-            return 0x0A;
-        case '.':
-        case ',':
-            return 0x80;
-        default:
-            return 0x0F;
+static void print_screen(const VScreen& scr)
+{
+    for(auto [begin, end] : scr.rows()) {
+        std::copy(begin, end, std::ostream_iterator<std::bitset<8>>(std::cout, " "));
+        std::cout << std::endl;
     }
 }
-
-static const char* convert_to_7219(uint8_t* buf, size_t size, const char* sp)
-{
-    for(uint8_t* bp = buf; bp != (buf + size); ++bp) {
-        if( *sp == '\0' )
-            break;
-        uint8_t ch = to_font_7219(*sp++);
-        if(ch == 0x80) {
-            if(!sp)
-                break;
-            if(bp != buf) {
-                bp[-1] |= ch;
-                ch = to_font_7219(*sp++);
-            }
-        }
-        *bp = ch;
-    }
-    return sp;
-}
-
-static void initialize(int fd)
-{
-    //Send_7219(fd, 0x09, 0xFF);//включим режим декодирования
-    Send_7219(fd, 0x09, 0x00);//выключим режим декодирования
-    Send_7219(fd, 0x0B, 0x07);//кол-во используемых разрядов
-    Send_7219(fd, 0x0A, 0x01);//интенсивность свечения
-    Send_7219(fd, 0x0C, 0x01);//включим индикатор
-
-    Clear_7219(fd);
-}
-
-static void demo(int fd);
 
 int main(int argc, char *argv[])
 {
-    int ret = 0;
-    int fd;
+    VScreen scr;
+    std::cout << "W = " << scr.width() << ", H = " << scr.height()
+        << ", Bytes = " << scr.sizeBytes() << std::endl;
+    print_screen(scr);
+    scr.fill(0x5A);
+    print_screen(scr);
+    return 0;
 
     parse_opts(argc, argv);
-
-    fd = open(device, O_RDWR);
-    if (fd < 0)
-        pabort("can't open device");
-
-    /*
-     * spi mode
-     */
-    ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
-    if (ret == -1)
-        pabort("can't set spi mode");
-
-    ret = ioctl(fd, SPI_IOC_RD_MODE, &mode);
-    if (ret == -1)
-        pabort("can't get spi mode");
-
-    /*
-     * bits per word
-     */
-    ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
-    if (ret == -1)
-        pabort("can't set bits per word");
-
-    ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits);
-    if (ret == -1)
-        pabort("can't get bits per word");
-
-    /*
-     * max speed hz
-     */
-    ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
-    if (ret == -1)
-        pabort("can't set max speed hz");
-
-    ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed);
-    if (ret == -1)
-        pabort("can't get max speed hz");
 
     printf("spi mode: %d\n", mode);
     printf("bits per word: %d\n", bits);
     printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
-    initialize(fd);
+    SPI spi(device, mode, bits, speed, delay);
+    Display display(spi);
 
-    Send_7219(fd, 0x0F, 0x01);
-    usleep(100000*10L);
-    Send_7219(fd, 0x0F, 0x00);
-    usleep(100000*10L);
+    // initialize(fd);
 
-    std::array<uint16_t, 4> transform_buf;
-    std::array<uint8_t, 4> line1{ 0x55, 0x55, 0x55, 0x55 };
-    std::array<uint8_t, 4> line2{ 0xAA, 0xAA, 0xAA, 0xAA };
+    // Send_7219(fd, 0x0F, 0x01);
+    // usleep(100000*10L);
+    // Send_7219(fd, 0x0F, 0x00);
+    // usleep(100000*10L);
 
-    for(;;) {
+    // std::array<uint16_t, 4> transform_buf;
+    // std::array<uint8_t, 4> line1{ 0x55, 0x55, 0x55, 0x55 };
+    // std::array<uint8_t, 4> line2{ 0xAA, 0xAA, 0xAA, 0xAA };
 
-        std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x01));
-        for(auto& v: transform_buf) {
-            std::cout << std::hex << v << ' ';
-        }
-        std::cout << std::endl;
-        send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
+    // for(;;) {
 
-        std::transform(line2.begin(), line2.end(), transform_buf.begin(), make_7219_transformer(0x02));
-        for(auto& v: transform_buf) {
-            std::cout << std::hex << v << ' ';
-        }
-        std::cout << std::endl;
+    //     std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x01));
+    //     for(auto& v: transform_buf) {
+    //         std::cout << std::hex << v << ' ';
+    //     }
+    //     std::cout << std::endl;
+    //     send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
 
-        send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
+    //     std::transform(line2.begin(), line2.end(), transform_buf.begin(), make_7219_transformer(0x02));
+    //     for(auto& v: transform_buf) {
+    //         std::cout << std::hex << v << ' ';
+    //     }
+    //     std::cout << std::endl;
 
-        //Send_7219(fd, 0x01, 0x55);
-        //Send_7219(fd, 0x02, 0xAA);
-        Send_7219(fd, 0x03, 0x55);
-        Send_7219(fd, 0x04, 0xAA);
-        Send_7219(fd, 0x05, 0x55);
-        Send_7219(fd, 0x06, 0xAA);
-        Send_7219(fd, 0x07, 0x55);
-        Send_7219(fd, 0x08, 0xAA);
-        usleep(100000*10L);
+    //     send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
 
-        std::transform(line2.begin(), line2.end(), transform_buf.begin(), make_7219_transformer(0x01));
-        send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
+    //     //Send_7219(fd, 0x01, 0x55);
+    //     //Send_7219(fd, 0x02, 0xAA);
+    //     Send_7219(fd, 0x03, 0x55);
+    //     Send_7219(fd, 0x04, 0xAA);
+    //     Send_7219(fd, 0x05, 0x55);
+    //     Send_7219(fd, 0x06, 0xAA);
+    //     Send_7219(fd, 0x07, 0x55);
+    //     Send_7219(fd, 0x08, 0xAA);
+    //     usleep(100000*10L);
 
-        std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x02));
-        send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
+    //     std::transform(line2.begin(), line2.end(), transform_buf.begin(), make_7219_transformer(0x01));
+    //     send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
 
-        //Send_7219(fd, 0x01, 0xAA);
-        //Send_7219(fd, 0x02, 0x55);
-        Send_7219(fd, 0x03, 0xAA);
-        Send_7219(fd, 0x04, 0x55);
-        Send_7219(fd, 0x05, 0xAA);
-        Send_7219(fd, 0x06, 0x55);
-        Send_7219(fd, 0x07, 0xAA);
-        Send_7219(fd, 0x08, 0x55);
-        usleep(100000*10L);
+    //     std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x02));
+    //     send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
 
-    }
+    //     //Send_7219(fd, 0x01, 0xAA);
+    //     //Send_7219(fd, 0x02, 0x55);
+    //     Send_7219(fd, 0x03, 0xAA);
+    //     Send_7219(fd, 0x04, 0x55);
+    //     Send_7219(fd, 0x05, 0xAA);
+    //     Send_7219(fd, 0x06, 0x55);
+    //     Send_7219(fd, 0x07, 0xAA);
+    //     Send_7219(fd, 0x08, 0x55);
+    //     usleep(100000*10L);
 
-    demo(fd);
-    demo(fd);
-    demo(fd);
-    demo(fd);
-    demo(fd);
-    demo(fd);
-    demo(fd);
+    // }
 
-    struct timeval tv;
-    struct tm tm;
-    uint8_t buf[8]= {0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F};
-    uint8_t buf2[8] = {0x00, };
-    uint8_t* bufs[2] = { buf, buf2 };
-    int m = 0;
-    char str[30];
+    // demo(fd);
+    // demo(fd);
+    // demo(fd);
+    // demo(fd);
+    // demo(fd);
+    // demo(fd);
+    // demo(fd);
 
-    for(int n = 0; ; n++) {
-        gettimeofday(&tv, NULL);
-        tv.tv_sec += 3*60*60;
-        localtime_r(&tv.tv_sec, &tm);
+    // struct timeval tv;
+    // struct tm tm;
+    // uint8_t buf[8]= {0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F};
+    // uint8_t buf2[8] = {0x00, };
+    // uint8_t* bufs[2] = { buf, buf2 };
+    // int m = 0;
+    // char str[30];
 
-        uint8_t* front = bufs[(n+0) % 2];
-        uint8_t* back =  bufs[(n+1) % 2];
+    // for(int n = 0; ; n++) {
+    //     gettimeofday(&tv, NULL);
+    //     tv.tv_sec += 3*60*60;
+    //     localtime_r(&tv.tv_sec, &tm);
 
-        if( m != tm.tm_min ) {
-            initialize(fd);
-            demo(fd);
-            memset(back, 0x0F, 8);
-            memset(front, 0x0F, 8);
-            m = tm.tm_min;
-        }
+    //     uint8_t* front = bufs[(n+0) % 2];
+    //     uint8_t* back =  bufs[(n+1) % 2];
 
-        if( tv.tv_usec < 500000 ) {
-            strftime(str, sizeof(str), "%H %M-%S", &tm);
-        }
-        else {
-            strftime(str, sizeof(str), "%H-%M %S", &tm);
-        }
-        convert_to_7219(front, 8, str);
+    //     if( m != tm.tm_min ) {
+    //         initialize(fd);
+    //         demo(fd);
+    //         memset(back, 0x0F, 8);
+    //         memset(front, 0x0F, 8);
+    //         m = tm.tm_min;
+    //     }
 
-        for(int i = 0; i<8; i++) {
-            if( front[i] != back[i] ) {
-                Send_7219(fd, 8 - i, front[i]);
-            }
-        }
-        usleep(20000);
-    }
+    //     if( tv.tv_usec < 500000 ) {
+    //         strftime(str, sizeof(str), "%H %M-%S", &tm);
+    //     }
+    //     else {
+    //         strftime(str, sizeof(str), "%H-%M %S", &tm);
+    //     }
+    //     convert_to_7219(front, 8, str);
 
-    close(fd);
+    //     for(int i = 0; i<8; i++) {
+    //         if( front[i] != back[i] ) {
+    //             Send_7219(fd, 8 - i, front[i]);
+    //         }
+    //     }
+    //     usleep(20000);
+    // }
 
-    return ret;
-}
+    // close(fd);
 
-struct demo_prg_t {
-    int pos;
-    int val;
-    int delay;
-};
-
-typedef struct demo_prg_t demo_prg_t;
-
-static const demo_prg_t prg1[] = {
-/*
-    { 8, SEG_E, 1 },
-    { 8, SEG_F + SEG_E, 1 },
-    { 8, SEG_F + SEG_A, 1 },
-    { 8, SEG_A, 0 }, { 7, SEG_A, 1 },
-    { 8, BLANK, 0 }, { 6, SEG_A, 1 },
-    { 7, BLANK, 0 }, { 5, SEG_A, 1 },
-    { 6, BLANK, 0 }, { 4, SEG_A, 1 },
-    { 5, BLANK, 0 }, { 3, SEG_A, 1 },
-    { 4, BLANK, 0 }, { 2, SEG_A, 1 },
-    { 3, BLANK, 0 }, { 1, SEG_A, 1 },
-    { 2, BLANK, 0 }, { 1, SEG_A + SEG_B, 1 },
-    { 1, SEG_B + SEG_C, 1 },
-    { 1, SEG_C + SEG_D, 1 },
-    { 1, SEG_D, 0 }, { 2, SEG_D, 1 },
-    { 1, BLANK, 0 }, { 3, SEG_D, 1 },
-    { 2, BLANK, 0 }, { 4, SEG_D, 1 },
-    { 3, BLANK, 0 }, { 5, SEG_D, 1 },
-    { 4, BLANK, 0 }, { 6, SEG_D, 1 },
-    { 5, BLANK, 0 }, { 7, SEG_D, 1 },
-    { 6, BLANK, 0 }, { 8, SEG_D, 1 },
-    { 7, BLANK, 0 }, { 8, SEG_D + SEG_E, 1 },
-    { 8, SEG_E + SEG_F, 1 },
- */
-    { 8, SEG_E, 1 },
-    { 8, SEG_E + SEG_F, 1 },
-    { 8, SEG_E + SEG_F + SEG_A, 1 },
-
-    { 8, SEG_E + SEG_F + SEG_A, 1 },
-    { 7, SEG_A, 1 },
-    { 6, SEG_A, 1 },
-    { 5, SEG_A, 1 },
-    { 4, SEG_A, 1 },
-    { 3, SEG_A, 1 },
-    { 2, SEG_A, 1 },
-    { 1, SEG_A, 1 },
-    { 1, SEG_A + SEG_B, 1 },
-    { 1, SEG_A + SEG_B + SEG_C, 1 },
-    { 1, SEG_A + SEG_B + SEG_C + SEG_D, 1 },
-    { 2, SEG_A + SEG_D, 1 },
-    { 3, SEG_A + SEG_D, 1 },
-    { 4, SEG_A + SEG_D, 1 },
-    { 5, SEG_A + SEG_D, 1 },
-    { 6, SEG_A + SEG_D, 1 },
-    { 7, SEG_A + SEG_D, 1 },
-    { 8, SEG_A + SEG_D + SEG_E + SEG_F, 1 },
-
-    { 8, SEG_D + SEG_F + SEG_A, 1 },
-    { 8, SEG_D + SEG_A, 1 },
-    { 8, SEG_D, 1 },
-    { 7, SEG_D, 1 },
-    { 6, SEG_D, 1 },
-    { 5, SEG_D, 1 },
-    { 4, SEG_D, 1 },
-    { 3, SEG_D, 1 },
-    { 2, SEG_D, 1 },
-    { 1, SEG_B + SEG_C + SEG_D, 1 },
-    { 1, SEG_C + SEG_D, 1 },
-    { 1, SEG_D, 1 },
-    { 1, BLANK, 1 },
-    { 2, BLANK, 1 },
-    { 3, BLANK, 1 },
-    { 4, BLANK, 1 },
-    { 5, BLANK, 1 },
-    { 6, BLANK, 1 },
-    { 7, BLANK, 1 },
-    { 8, BLANK, 1 }
-};
-
-static void demo(int fd)
-{
-    Send_7219(fd, 0x09, 0x00);
-    for(int i = 0; i < 8; i++)
-        Send_7219(fd, i + 1, 0x00);
-
-    for(size_t i = 0; i < ARRAY_SIZE(prg1); i++) {
-        Send_7219(fd, prg1[i].pos, prg1[i].val);
-        if( prg1[i].delay ) {
-            usleep(20000);
-        }
-    }
-    Send_7219(fd, 0x09, 0xFF);
+    // return ret;
 }
 
