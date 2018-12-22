@@ -1,5 +1,7 @@
 {
     "files.associations": {
         "system_error": "cpp"
-    }
+    },
+    // Управляет размером шрифта в пикселях.
+    "editor.fontSize": 16,
 }

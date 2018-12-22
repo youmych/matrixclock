@@ -38,7 +38,7 @@ enum Reg : uint8_t {
     DIGIT_7     = 0x08,
 
     DECODE_MODE = 0x09,
-    INTENSIVITY = 0x0A,
+    INTENSITY   = 0x0A,
     SCAN_LIMIT  = 0x0B,
     SHUTDOWN    = 0x0C,
 
@@ -62,7 +62,7 @@ const char* to_string(Reg r) {
         TO_STRING(DIGIT_7);
 
         TO_STRING(DECODE_MODE);
-        TO_STRING(INTENSIVITY);
+        TO_STRING(INTENSITY);
         TO_STRING(SCAN_LIMIT);
         TO_STRING(SHUTDOWN);
 
