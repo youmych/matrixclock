@@ -218,31 +218,32 @@ public:
     /// кол-во последовательно подключенных микросхем
     static constexpr size_t IC_LINE_SIZE = 4;
 
-    Display(SPI& spi) : m_SPI(spi) {}
+    // Display(SPI& spi) : m_SPI(spi) {}
+    explicit Display() { Initialize(); }
 
-    static void SendCmd(SPI& spi, MAX7219::Reg reg, uint8_t cmd) {
-        std::array<uint16_t, IC_LINE_SIZE> renderBuf;
-        std::generate(renderBuf.begin(), renderBuf.end(), MAX7219::make_cmd(reg, cmd));
-        spi.Transfer(renderBuf.data(), renderBuf.size()*sizeof(uint16_t));
-    }
+    // static void SendCmd(SPI& spi, MAX7219::Reg reg, uint8_t cmd) {
+    //     std::array<uint16_t, IC_LINE_SIZE> renderBuf;
+    //     std::generate(renderBuf.begin(), renderBuf.end(), MAX7219::make_cmd(reg, cmd));
+    //     spi.Transfer(renderBuf.data(), renderBuf.size()*sizeof(uint16_t));
+    // }
 
-    static void Initialize(SPI& spi) {
-        SendCmd(spi, MAX7219::Reg::DECODE_MODE, 0x00);//выключим режим декодирования
-        SendCmd(spi, MAX7219::Reg::SCAN_LIMIT,  0x07);//кол-во используемых разрядов
-        SendCmd(spi, MAX7219::Reg::INTENSIVITY, 0x01);//интенсивность свечения
-        SendCmd(spi, MAX7219::Reg::SHUTDOWN,    0x01);//включим индикатор
-    }
+    // static void Initialize(SPI& spi) {
+    //     SendCmd(spi, MAX7219::Reg::DECODE_MODE, 0x00);//выключим режим декодирования
+    //     SendCmd(spi, MAX7219::Reg::SCAN_LIMIT,  0x07);//кол-во используемых разрядов
+    //     SendCmd(spi, MAX7219::Reg::INTENSITY,   0x01);//интенсивность свечения
+    //     SendCmd(spi, MAX7219::Reg::SHUTDOWN,    0x01);//включим индикатор
+    // }
 
     void Initialize() {
-        Initialize(m_SPI);
+        // Initialize(m_SPI);
         Clear();
     }
 
     void Fill(uint8_t val = 0x00) {
-        for(uint8_t i = MAX7219::DIGIT_0; i < MAX7219::DIGIT_7; ++i) {
-            std::generate(m_RenderBuf.begin() + IC_LINE_SIZE*i,
-                          m_RenderBuf.begin() + IC_LINE_SIZE*(i+1),
-                          MAX7219::make_cmd(i, val));
+        for(size_t i = 0; i <= SEG_Y_POINTS; ++i) {
+            std::generate(m_RenderBuf.begin() + IC_LINE_SIZE * i,
+                          m_RenderBuf.begin() + IC_LINE_SIZE * (i + 1),
+                          MAX7219::make_cmd(MAX7219::DIGIT_0 + i, val));
         }
         Transfer();
     }
@@ -250,16 +251,58 @@ public:
     void Clear() { Fill(); }
 
     void Transfer() {
-        for(auto it = m_RenderBuf.begin(); it != m_RenderBuf.end(); it = std::next(it, IC_LINE_SIZE)) {
-            m_SPI.Transfer( &(*it), IC_LINE_SIZE*sizeof(uint16_t) );
+        // for(auto it = m_RenderBuf.begin(); it != m_RenderBuf.end(); std::advance(it, IC_LINE_SIZE)) {
+        //     auto ofs = std::distance(m_RenderBuf.begin(), it);
+        //     m_SPI.Transfer( &m_RenderBuf[ofs], IC_LINE_SIZE*sizeof(uint16_t) );
+        // }
+    }
+
+    template <class InputIt>
+    void GrabLine(uint8_t displayLineNo, InputIt begin, InputIt end, uint8_t bitOfs) {
+        using namespace MAX7219;
+
+        bitOfs &= 0x07;
+        displayLineNo &= 0x07;
+
+        // максимальное смещение внутри буфера [begin, end)
+        auto maxOfs = std::distance(begin, end);
+        // всё, что выходит за границы входного буфера = 0
+        auto paddedData = [=](decltype(maxOfs) ofs) -> uint8_t {
+            if( ofs < maxOfs )
+                return *(begin + ofs);
+            return static_cast<uint8_t>(0);
+        };
+        // начало и конец буфера записи
+        auto lbegin = std::next(m_RenderBuf.begin(), displayLineNo*IC_LINE_SIZE);
+        auto lend = std::next(lbegin, IC_LINE_SIZE);
+        // преобразование байта данных в команду MAX7219
+        auto t = make_transformer(DIGIT_0 + displayLineNo);
+
+        if( bitOfs == 0 ) {
+            for( auto it = lbegin; it != lend; ++it ) {
+                auto ofs = std::distance(lbegin, it);
+                *it = t( paddedData(ofs) );
+            }
+        }
+        else {
+            for( auto it = lbegin; it != lend; ++it ) {
+                auto ofs = std::distance(lbegin, it);
+                *it = t( (paddedData(ofs) << bitOfs) + (paddedData(ofs+1) >> (8 - bitOfs)) );
+            }
         }
     }
 
-    // void Grab(const uint8_t* buf, int w, int h, int x, int y) {
+    void PrintBuf() {
+        for(size_t i = 0; i < SEG_Y_POINTS; ++i ) {
+            std::copy(m_RenderBuf.begin() + i*IC_LINE_SIZE,
+                      m_RenderBuf.begin() + (i+1)*IC_LINE_SIZE,
+                      std::ostream_iterator<std::bitset<16>>(std::cout, " "));
+            std::cout << std::endl;
+        }
+    }
 
-    // }
 private:
-    SPI& m_SPI;
+    // SPI& m_SPI;
     /// Буфер для рендеринга максимум 8 строк.
     /// MAX7219 соединены последовательно. Одна SPI-транзакция
     /// должна записать по одному значению в каждый из N регистров.
@@ -267,12 +310,11 @@ private:
     std::array<uint16_t, IC_LINE_SIZE*SEG_Y_POINTS> m_RenderBuf;
 };
 
-
-class VScreenRowIterotor {
+class VScreenRowIterator {
     using iterator = std::vector<uint8_t>::const_iterator;
     using difference_type = std::vector<uint8_t>::difference_type;
 public:
-    explicit VScreenRowIterotor(iterator begin, difference_type line_size)
+    explicit VScreenRowIterator(iterator begin, difference_type line_size)
         : m_Begin(begin)
         , m_Length(line_size)
         {}
@@ -281,12 +323,12 @@ public:
         return std::make_pair(m_Begin, std::next(m_Begin, m_Length));
     }
 
-    VScreenRowIterotor& operator++() {
+    VScreenRowIterator& operator++() {
         std::advance(m_Begin, m_Length);
         return *this;
     }
 
-    bool operator != (const VScreenRowIterotor& other) const {
+    bool operator != (const VScreenRowIterator& other) const {
         return m_Begin != other.m_Begin;
     }
 
@@ -341,12 +383,12 @@ public:
         Rows(const Rows&) = default;
         Rows(Rows&&) = default;
 
-        VScreenRowIterotor begin() const {
-            return VScreenRowIterotor(m_Data.cbegin(), m_LineLenght);
+        VScreenRowIterator begin() const {
+            return VScreenRowIterator(m_Data.cbegin(), m_LineLenght);
         }
 
-        VScreenRowIterotor end() const {
-            return VScreenRowIterotor(m_Data.cend(), 0);
+        VScreenRowIterator end() const {
+            return VScreenRowIterator(m_Data.cend(), 0);
         }
     };
 
@@ -379,12 +421,6 @@ private:
     /// Буфер экрана. Размер всегда кратен 8х8
     std::vector<uint8_t> m_Ddata;
 };
-
-static void pabort(const char *s)
-{
-    perror(s);
-    abort();
-}
 
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
@@ -491,8 +527,22 @@ int main(int argc, char *argv[])
     std::cout << "W = " << scr.width() << ", H = " << scr.height()
         << ", Bytes = " << scr.sizeBytes() << std::endl;
     print_screen(scr);
-    scr.fill(0x5A);
+    scr.fill(0xF0);
     print_screen(scr);
+
+    std::cout << std::endl;
+
+    Display d;
+    for( int t = 0; t < 8; ++t ) {
+        auto it = scr.rows().begin();
+        for(int i = 0; i < 8; ++i) {
+            d.GrabLine(i, (*it).first, (*it).second, t);
+            ++it;
+        }
+        d.PrintBuf();
+        std::cout << std::endl;
+    }
+
     return 0;
 
     parse_opts(argc, argv);
@@ -502,7 +552,11 @@ int main(int argc, char *argv[])
     printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
     SPI spi(device, mode, bits, speed, delay);
-    Display display(spi);
+    // Display display(spi);
+
+    // for(auto [begin, end] : scr.rows()) {
+    //     display.GrabLine(0, begin, end, 0);
+    // }
 
     // initialize(fd);
 
