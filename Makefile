@@ -3,7 +3,7 @@
 # $^ - means all prerequisites
 # $< - means just the first prerequisite
 
-CXX=g++
+CXX=g++-8.1.0
 
 INCLUDES=-I./src
 OPTIMIZE=-O3

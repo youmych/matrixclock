@@ -21,6 +21,9 @@
 #include <iostream>
 #include <iterator>
 #include <bitset>
+#include <chrono>
+#include <thread>
+#include <random>
 
 namespace MAX7219 {
 
@@ -218,24 +221,24 @@ public:
     /// кол-во последовательно подключенных микросхем
     static constexpr size_t IC_LINE_SIZE = 4;
 
-    // Display(SPI& spi) : m_SPI(spi) {}
-    explicit Display() { Initialize(); }
+    explicit Display(SPI& spi) : m_SPI(spi) {}
+    //explicit Display() { Initialize(); }
 
-    // static void SendCmd(SPI& spi, MAX7219::Reg reg, uint8_t cmd) {
-    //     std::array<uint16_t, IC_LINE_SIZE> renderBuf;
-    //     std::generate(renderBuf.begin(), renderBuf.end(), MAX7219::make_cmd(reg, cmd));
-    //     spi.Transfer(renderBuf.data(), renderBuf.size()*sizeof(uint16_t));
-    // }
+    static void SendCmd(SPI& spi, MAX7219::Reg reg, uint8_t cmd) {
+        std::array<uint16_t, IC_LINE_SIZE> renderBuf;
+        std::generate(renderBuf.begin(), renderBuf.end(), MAX7219::make_cmd(reg, cmd));
+        spi.Transfer(renderBuf.data(), renderBuf.size()*sizeof(uint16_t));
+    }
 
-    // static void Initialize(SPI& spi) {
-    //     SendCmd(spi, MAX7219::Reg::DECODE_MODE, 0x00);//выключим режим декодирования
-    //     SendCmd(spi, MAX7219::Reg::SCAN_LIMIT,  0x07);//кол-во используемых разрядов
-    //     SendCmd(spi, MAX7219::Reg::INTENSITY,   0x01);//интенсивность свечения
-    //     SendCmd(spi, MAX7219::Reg::SHUTDOWN,    0x01);//включим индикатор
-    // }
+    static void Initialize(SPI& spi) {
+        SendCmd(spi, MAX7219::Reg::DECODE_MODE, 0x00);//выключим режим декодирования
+        SendCmd(spi, MAX7219::Reg::SCAN_LIMIT,  0x07);//кол-во используемых разрядов
+        SendCmd(spi, MAX7219::Reg::INTENSITY,   0x01);//интенсивность свечения
+        SendCmd(spi, MAX7219::Reg::SHUTDOWN,    0x01);//включим индикатор
+    }
 
     void Initialize() {
-        // Initialize(m_SPI);
+        Initialize(m_SPI);
         Clear();
     }
 
@@ -251,10 +254,10 @@ public:
     void Clear() { Fill(); }
 
     void Transfer() {
-        // for(auto it = m_RenderBuf.begin(); it != m_RenderBuf.end(); std::advance(it, IC_LINE_SIZE)) {
-        //     auto ofs = std::distance(m_RenderBuf.begin(), it);
-        //     m_SPI.Transfer( &m_RenderBuf[ofs], IC_LINE_SIZE*sizeof(uint16_t) );
-        // }
+        for(auto it = m_RenderBuf.begin(); it != m_RenderBuf.end(); std::advance(it, IC_LINE_SIZE)) {
+            auto ofs = std::distance(m_RenderBuf.begin(), it);
+            m_SPI.Transfer( &m_RenderBuf[ofs], IC_LINE_SIZE*sizeof(uint16_t) );
+        }
     }
 
     template <class InputIt>
@@ -302,7 +305,7 @@ public:
     }
 
 private:
-    // SPI& m_SPI;
+    SPI& m_SPI;
     /// Буфер для рендеринга максимум 8 строк.
     /// MAX7219 соединены последовательно. Одна SPI-транзакция
     /// должна записать по одному значению в каждый из N регистров.
@@ -523,15 +526,21 @@ static void print_screen(const VScreen& scr)
 
 int main(int argc, char *argv[])
 {
-    VScreen scr;
+    VScreen scr/*(8*5)*/;
+
+    std::random_device rd;
+    std::uniform_int_distribution<int> distX(0, scr.width());   
+    std::uniform_int_distribution<int> distY(0, scr.height());
+    std::uniform_int_distribution<int> distB(0, 1);
+
     std::cout << "W = " << scr.width() << ", H = " << scr.height()
         << ", Bytes = " << scr.sizeBytes() << std::endl;
     print_screen(scr);
-    scr.fill(0xF0);
-    print_screen(scr);
+    //scr.fill(0x01);
+    //print_screen(scr);
 
     std::cout << std::endl;
-
+#if 0
     Display d;
     for( int t = 0; t < 8; ++t ) {
         auto it = scr.rows().begin();
@@ -544,7 +553,7 @@ int main(int argc, char *argv[])
     }
 
     return 0;
-
+#endif
     parse_opts(argc, argv);
 
     printf("spi mode: %d\n", mode);
@@ -552,7 +561,25 @@ int main(int argc, char *argv[])
     printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
     SPI spi(device, mode, bits, speed, delay);
-    // Display display(spi);
+    Display d(spi);
+
+    int n = 1000;
+
+    while(--n) {
+        scr.putPixel(distX(rd), distY(rd), distB(rd));
+    //    for( int t = 0; t < 8; ++t ) {
+            auto it = scr.rows().begin();
+            for(int i = 0; i < 8; ++i) {
+                d.GrabLine(i, (*it).first, (*it).second, 0);
+                ++it;
+            }
+            d.PrintBuf();
+            d.Transfer();
+            std::cout << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+//        }
+    }
+
 
     // for(auto [begin, end] : scr.rows()) {
     //     display.GrabLine(0, begin, end, 0);
