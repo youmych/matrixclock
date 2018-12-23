@@ -617,13 +617,23 @@ void draw(Display& d, const VScreen& scr)
     std::cout << std::endl;
 }
 
+struct train {
+    int len;
+    int pos;
+    int speed;
+
+    explicit train(int l = 1, int p = 0, int s = 1) : len(l), pos(p), speed(s) {}
+    train(const train&) = default;
+    train& operator=(const train&) = default;
+};
+
 int main(int argc, char *argv[])
 {
     VScreen scr/*(8*5)*/;
 
     std::random_device rd;
-    std::uniform_real_distribution<> distX(0, scr.width());   
-    std::uniform_real_distribution<> distY(0, scr.height());
+    std::uniform_int_distribution<int> distL(1, 8*4*2);
+    std::uniform_int_distribution<int> distS(1, 2);
 
     std::cout << "W = " << scr.width() << ", H = " << scr.height()
         << ", Bytes = " << scr.sizeBytes() << std::endl;
@@ -645,17 +655,28 @@ int main(int argc, char *argv[])
         std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 
-    double t = 0;
-    double dt = 0.2;
+    std::array<train, 8> trains;
+    std::generate(trains.begin(), trains.end(), [&]() {
+        auto l = distL(rd);
+        return train(l, -l, distS(rd));
+    });
+
     while(--n) {
         scr.clear();
-        
-        for(unsigned x = 0; x < scr.width(); ++x) {
-            auto y = 4 + 4*sin(x/3.0 + t);
-            scr.putPixel(x, y);
+        for(unsigned y = 0; y < scr.height(); ++y) {
+            for(auto x = trains[y].pos; x < trains[y].pos + trains[y].len; ++x)
+                scr.putPixel(x, y);
         }
-        t += dt;
         draw(d, scr);
+
+        std::transform(trains.begin(), trains.end(), trains.begin(), [&](auto t){
+            t.pos += t.speed;
+            if( t.pos > scr.width() + t.len ) {
+                auto l = distL(rd);
+                return train(l, -l, distS(rd));
+            }
+            return t;
+        });
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
