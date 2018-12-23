@@ -622,9 +622,8 @@ int main(int argc, char *argv[])
     VScreen scr/*(8*5)*/;
 
     std::random_device rd;
-    std::uniform_int_distribution<int> distX(0, scr.width());   
-    std::uniform_int_distribution<int> distY(0, scr.height());
-    std::uniform_int_distribution<int> distB(0, 4);
+    std::uniform_real_distribution<> distX(0, scr.width());   
+    std::uniform_real_distribution<> distY(0, scr.height());
 
     std::cout << "W = " << scr.width() << ", H = " << scr.height()
         << ", Bytes = " << scr.sizeBytes() << std::endl;
@@ -647,7 +646,7 @@ int main(int argc, char *argv[])
     }
 
     Point c(scr.width()/2, scr.height()/2);
-    std::array<Point, 20> stars;
+    std::array<Point, 10> stars;
 
     std::generate(stars.begin(), stars.end(), [&]() {
         return Point(distX(rd), distY(rd));
@@ -664,10 +663,11 @@ int main(int argc, char *argv[])
 #endif    
 #if 1
     while(--n) {
+        
         scr.clear();
         for(auto const& s: stars) {
             scr.putPixel(s.x(), s.y());
-            std::cout << "(" << static_cast<int>(s.x()) << ", " << static_cast<int>(s.y()) << ") ";
+            std::cout << "(" << s.x() << ", " << s.y() << ") ";
         }
         std::cout << std::endl;
 
@@ -676,7 +676,7 @@ int main(int argc, char *argv[])
         std::transform(stars.begin(), stars.end(), stars.begin(), [&](Point p){
             p += (p - c)*0.1;
             
-            if( p.x() < 0 || p.x() > scr.width() || p.y() < 0 || p.y() > scr.height() ) {
+            if( p.x() < 0 || p.x() >= scr.width() || p.y() < 0 || p.y() >= scr.height() ) {
                 return Point(distX(rd), distY(rd));
             }
             return p;
