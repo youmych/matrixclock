@@ -645,152 +645,20 @@ int main(int argc, char *argv[])
         std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 
-    Point c(scr.width()/2, scr.height()/2);
-    std::array<Point, 10> stars;
-
-    std::generate(stars.begin(), stars.end(), [&]() {
-        return Point(distX(rd), distY(rd));
-    });
-
-#if 0
-    for(int y = 0; y < scr.height(); ++y) {
-        for(int x = 0; x < scr.width(); ++x) {
-            scr.putPixel(x, y);
-            draw(d, scr);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
-#endif    
-#if 1
+    double t = 0;
+    double dt = 0.2;
     while(--n) {
-        
         scr.clear();
-        for(auto const& s: stars) {
-            scr.putPixel(s.x(), s.y());
-            std::cout << "(" << s.x() << ", " << s.y() << ") ";
+        
+        for(unsigned x = 0; x < scr.width(); ++x) {
+            auto y = 4 + 4*sin(x/3.0 + t);
+            scr.putPixel(x, y);
         }
-        std::cout << std::endl;
-
+        t += dt;
         draw(d, scr);
-
-        std::transform(stars.begin(), stars.end(), stars.begin(), [&](Point p){
-            p += (p - c)*0.1;
-            
-            if( p.x() < 0 || p.x() >= scr.width() || p.y() < 0 || p.y() >= scr.height() ) {
-                return Point(distX(rd), distY(rd));
-            }
-            return p;
-        });
-
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-#endif
-    // initialize(fd);
 
-    // Send_7219(fd, 0x0F, 0x01);
-    // usleep(100000*10L);
-    // Send_7219(fd, 0x0F, 0x00);
-    // usleep(100000*10L);
-
-    // std::array<uint16_t, 4> transform_buf;
-    // std::array<uint8_t, 4> line1{ 0x55, 0x55, 0x55, 0x55 };
-    // std::array<uint8_t, 4> line2{ 0xAA, 0xAA, 0xAA, 0xAA };
-
-    // for(;;) {
-
-    //     std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x01));
-    //     for(auto& v: transform_buf) {
-    //         std::cout << std::hex << v << ' ';
-    //     }
-    //     std::cout << std::endl;
-    //     send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
-
-    //     std::transform(line2.begin(), line2.end(), transform_buf.begin(), make_7219_transformer(0x02));
-    //     for(auto& v: transform_buf) {
-    //         std::cout << std::hex << v << ' ';
-    //     }
-    //     std::cout << std::endl;
-
-    //     send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
-
-    //     //Send_7219(fd, 0x01, 0x55);
-    //     //Send_7219(fd, 0x02, 0xAA);
-    //     Send_7219(fd, 0x03, 0x55);
-    //     Send_7219(fd, 0x04, 0xAA);
-    //     Send_7219(fd, 0x05, 0x55);
-    //     Send_7219(fd, 0x06, 0xAA);
-    //     Send_7219(fd, 0x07, 0x55);
-    //     Send_7219(fd, 0x08, 0xAA);
-    //     usleep(100000*10L);
-
-    //     std::transform(line2.begin(), line2.end(), transform_buf.begin(), make_7219_transformer(0x01));
-    //     send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
-
-    //     std::transform(line1.begin(), line1.end(), transform_buf.begin(), make_7219_transformer(0x02));
-    //     send_buf_7219(fd, transform_buf.data(), transform_buf.size()*sizeof(uint16_t));
-
-    //     //Send_7219(fd, 0x01, 0xAA);
-    //     //Send_7219(fd, 0x02, 0x55);
-    //     Send_7219(fd, 0x03, 0xAA);
-    //     Send_7219(fd, 0x04, 0x55);
-    //     Send_7219(fd, 0x05, 0xAA);
-    //     Send_7219(fd, 0x06, 0x55);
-    //     Send_7219(fd, 0x07, 0xAA);
-    //     Send_7219(fd, 0x08, 0x55);
-    //     usleep(100000*10L);
-
-    // }
-
-    // demo(fd);
-    // demo(fd);
-    // demo(fd);
-    // demo(fd);
-    // demo(fd);
-    // demo(fd);
-    // demo(fd);
-
-    // struct timeval tv;
-    // struct tm tm;
-    // uint8_t buf[8]= {0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F};
-    // uint8_t buf2[8] = {0x00, };
-    // uint8_t* bufs[2] = { buf, buf2 };
-    // int m = 0;
-    // char str[30];
-
-    // for(int n = 0; ; n++) {
-    //     gettimeofday(&tv, NULL);
-    //     tv.tv_sec += 3*60*60;
-    //     localtime_r(&tv.tv_sec, &tm);
-
-    //     uint8_t* front = bufs[(n+0) % 2];
-    //     uint8_t* back =  bufs[(n+1) % 2];
-
-    //     if( m != tm.tm_min ) {
-    //         initialize(fd);
-    //         demo(fd);
-    //         memset(back, 0x0F, 8);
-    //         memset(front, 0x0F, 8);
-    //         m = tm.tm_min;
-    //     }
-
-    //     if( tv.tv_usec < 500000 ) {
-    //         strftime(str, sizeof(str), "%H %M-%S", &tm);
-    //     }
-    //     else {
-    //         strftime(str, sizeof(str), "%H-%M %S", &tm);
-    //     }
-    //     convert_to_7219(front, 8, str);
-
-    //     for(int i = 0; i<8; i++) {
-    //         if( front[i] != back[i] ) {
-    //             Send_7219(fd, 8 - i, front[i]);
-    //         }
-    //     }
-    //     usleep(20000);
-    // }
-
-    // close(fd);
-
-    // return ret;
+    return 0;
 }
 
