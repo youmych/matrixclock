@@ -359,9 +359,9 @@ public:
         if( x >= width() || y >= height() )
             return;
         if( val )
-            m_Ddata[ offset(x, y) ] |= bitMask(x % 8);
+            m_Ddata[ offset(x, y) ] |= bitMask(7 - (x % 8));
         else
-            m_Ddata[ offset(x, y) ] &= ~bitMask(x % 8);
+            m_Ddata[ offset(x, y) ] &= ~bitMask(7 - (x % 8));
     }
 
     void clear() {
@@ -657,7 +657,7 @@ int main(int argc, char *argv[])
         for(int x = 0; x < scr.width(); ++x) {
             scr.putPixel(x, y);
             draw(d, scr);
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
     
