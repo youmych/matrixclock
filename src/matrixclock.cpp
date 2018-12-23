@@ -524,6 +524,99 @@ static void print_screen(const VScreen& scr)
     }
 }
 
+class Point {
+    double px, py;
+
+public:
+    explicit Point(double x_ = 0.0, double y_ = 0.0) : px(x_), py(y_) {}
+    Point(const Point&) = default;
+    Point& operator=(const Point&) = default;
+
+    double x() const { return px; }
+    double y() const { return py; }
+
+    Point operator+(const Point& p) {
+        return Point(x() + p.x(), y() + p.y());
+    }
+
+    Point operator-(const Point& p) {
+        return Point(x() - p.x(), y() - p.y());
+    }
+
+    Point operator*(int k) {
+        return Point(x() * k, y() * k);
+    }
+
+    Point operator/(int k) {
+        return Point(x() / k, y() / k);
+    }
+
+    Point operator*(double k) {
+        return Point(x() * k, y() * k);
+    }
+
+    Point operator/(double k) {
+        return Point(x() / k, y() / k);
+    }
+
+    Point& operator+=(const Point& t) { 
+        px += t.x();
+        py += t.y();
+        return *this;
+    }    
+
+    Point& operator-=(const Point& t) { 
+        px -= t.x();
+        py -= t.y();
+        return *this;
+    }    
+
+    Point& operator*=(int k) { 
+        px *= k;
+        py *= k;
+        return *this;
+    }    
+
+    Point& operator/=(int k) { 
+        px /= k;
+        py /= k;
+        return *this;
+    }  
+
+    Point& operator*=(double k) { 
+        px *= k;
+        py *= k;
+        return *this;
+    }    
+
+    Point& operator/=(double k) { 
+        px /= k;
+        py /= k;
+        return *this;
+    }   
+
+};
+
+Point operator*(int k, const Point& p) {
+    return Point(p.x() * k, p.y() * k);
+}
+
+Point operator*(double k, const Point& p) {
+    return Point(p.x() * k, p.y() * k);
+}
+
+void draw(Display& d, const VScreen& scr)
+{
+    auto it = scr.rows().begin();
+    for(int i = 0; i < 8; ++i) {
+        d.GrabLine(i, (*it).first, (*it).second, 0);
+        ++it;
+    }
+    d.PrintBuf();
+    d.Transfer();
+    std::cout << std::endl;
+}
+
 int main(int argc, char *argv[])
 {
     VScreen scr/*(8*5)*/;
@@ -531,29 +624,12 @@ int main(int argc, char *argv[])
     std::random_device rd;
     std::uniform_int_distribution<int> distX(0, scr.width());   
     std::uniform_int_distribution<int> distY(0, scr.height());
-    std::uniform_int_distribution<int> distB(0, 1);
+    std::uniform_int_distribution<int> distB(0, 4);
 
     std::cout << "W = " << scr.width() << ", H = " << scr.height()
         << ", Bytes = " << scr.sizeBytes() << std::endl;
     print_screen(scr);
-    //scr.fill(0x01);
-    //print_screen(scr);
 
-    std::cout << std::endl;
-#if 0
-    Display d;
-    for( int t = 0; t < 8; ++t ) {
-        auto it = scr.rows().begin();
-        for(int i = 0; i < 8; ++i) {
-            d.GrabLine(i, (*it).first, (*it).second, t);
-            ++it;
-        }
-        d.PrintBuf();
-        std::cout << std::endl;
-    }
-
-    return 0;
-#endif
     parse_opts(argc, argv);
 
     printf("spi mode: %d\n", mode);
@@ -563,28 +639,60 @@ int main(int argc, char *argv[])
     SPI spi(device, mode, bits, speed, delay);
     Display d(spi);
 
-    int n = 1000;
-
-    while(--n) {
-        scr.putPixel(distX(rd), distY(rd), distB(rd));
-    //    for( int t = 0; t < 8; ++t ) {
-            auto it = scr.rows().begin();
-            for(int i = 0; i < 8; ++i) {
-                d.GrabLine(i, (*it).first, (*it).second, 0);
-                ++it;
-            }
-            d.PrintBuf();
-            d.Transfer();
-            std::cout << std::endl;
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-//        }
+    int n = 100;
+    if( argc > 1 ) {
+        n = atoi(argv[1]);
+        std::cout << "Loop count = " << n << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 
+    Point c(scr.width()/2, scr.height()/2);
+    std::array<Point, 20> stars;
 
-    // for(auto [begin, end] : scr.rows()) {
-    //     display.GrabLine(0, begin, end, 0);
-    // }
+    std::generate(stars.begin(), stars.end(), [&]() {
+        return Point(distX(rd), distY(rd));
+    });
 
+    for(int y = 0; y < scr.height(); ++y) {
+        for(int x = 0; x < scr.width(); ++x) {
+            scr.putPixel(x, y);
+            draw(d, scr);
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+    }
+    
+#if 0
+    while(--n) {
+        scr.clear();
+        for(auto const& s: stars) {
+            scr.putPixel(s.x(), s.y());
+            std::cout << "(" << static_cast<int>(s.x()) << ", " << static_cast<int>(s.y()) << ") ";
+        }
+        std::cout << std::endl;
+
+        draw(d, scr);
+
+        std::transform(stars.begin(), stars.end(), stars.begin(), [&](Point p){
+            auto r = (p - c);
+            
+            if( r.x() <= 0 && r.y() <= 0 ) 
+                p += Point(-1, -1);
+            else if( r.x() > 0 && r.y() <= 0 )
+                p += Point(1, -1);
+            else if( r.x() <= 0 && r.y() > 0 )
+                p += Point(-1, 1);
+            else
+                p += Point(1, 1);
+
+            if( p.x() < 0 || p.x() > scr.width() || p.y() < 0 || p.y() > scr.height() ) {
+                return Point(distX(rd), distY(rd));
+            }
+            return p;
+        });
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+#endif
     // initialize(fd);
 
     // Send_7219(fd, 0x0F, 0x01);
