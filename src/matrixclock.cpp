@@ -653,6 +653,7 @@ int main(int argc, char *argv[])
         return Point(distX(rd), distY(rd));
     });
 
+#if 0
     for(int y = 0; y < scr.height(); ++y) {
         for(int x = 0; x < scr.width(); ++x) {
             scr.putPixel(x, y);
@@ -660,8 +661,8 @@ int main(int argc, char *argv[])
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
-    
-#if 0
+#endif    
+#if 1
     while(--n) {
         scr.clear();
         for(auto const& s: stars) {
@@ -673,24 +674,15 @@ int main(int argc, char *argv[])
         draw(d, scr);
 
         std::transform(stars.begin(), stars.end(), stars.begin(), [&](Point p){
-            auto r = (p - c);
+            p += (p - c)*0.1;
             
-            if( r.x() <= 0 && r.y() <= 0 ) 
-                p += Point(-1, -1);
-            else if( r.x() > 0 && r.y() <= 0 )
-                p += Point(1, -1);
-            else if( r.x() <= 0 && r.y() > 0 )
-                p += Point(-1, 1);
-            else
-                p += Point(1, 1);
-
             if( p.x() < 0 || p.x() > scr.width() || p.y() < 0 || p.y() > scr.height() ) {
                 return Point(distX(rd), distY(rd));
             }
             return p;
         });
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 #endif
     // initialize(fd);
