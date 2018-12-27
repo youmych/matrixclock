@@ -627,12 +627,17 @@ struct train {
     train& operator=(const train&) = default;
 };
 
+std::ostream& operator<<(std::ostream& os, const train& t)
+{
+    return os << "[p:" << t.pos << ", l:" << t.len << ", s:" << t.speed << "]";
+}
+
 int main(int argc, char *argv[])
 {
     VScreen scr/*(8*5)*/;
 
     std::random_device rd;
-    std::uniform_int_distribution<int> distL(1, 8*4*2);
+    std::uniform_int_distribution<int> distL(3, 8*4*2);
     std::uniform_int_distribution<int> distS(1, 2);
 
     std::cout << "W = " << scr.width() << ", H = " << scr.height()
@@ -669,15 +674,18 @@ int main(int argc, char *argv[])
         }
         draw(d, scr);
 
-        std::transform(trains.begin(), trains.end(), trains.begin(), [&](auto t){
+        std::transform(trains.begin(), trains.end(), trains.begin(), [&](train t){
             t.pos += t.speed;
-            if( t.pos > scr.width() + t.len ) {
+            if( t.pos > scr.width() ) {
+                std::cout << "pos=" << t.pos << ", w=" << scr.width() << std::endl;
                 auto l = distL(rd);
                 return train(l, -l, distS(rd));
             }
             return t;
         });
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::copy(trains.begin(), trains.end(), std::ostream_iterator<train>(std::cout, " "));
+        std::cout << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
     return 0;
