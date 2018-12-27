@@ -637,7 +637,7 @@ int main(int argc, char *argv[])
     VScreen scr/*(8*5)*/;
 
     std::random_device rd;
-    std::uniform_int_distribution<int> distL(3, 8*4*2);
+    std::uniform_int_distribution<int> distL(0, 8*2);
     std::uniform_int_distribution<int> distS(1, 2);
 
     std::cout << "W = " << scr.width() << ", H = " << scr.height()
@@ -660,7 +660,7 @@ int main(int argc, char *argv[])
         std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 
-    std::array<train, 8> trains;
+    std::array<train, 8*4> trains;
     std::generate(trains.begin(), trains.end(), [&]() {
         auto l = distL(rd);
         return train(l, -l, distS(rd));
@@ -668,9 +668,9 @@ int main(int argc, char *argv[])
 
     while(--n) {
         scr.clear();
-        for(unsigned y = 0; y < scr.height(); ++y) {
-            const auto& t = trains[y];
-            for(auto x = std::max(t.pos - t.len, 0); x < std::min(t.pos, (int)scr.width()); ++x)
+        for(unsigned x = 0; x < scr.width(); ++x) {
+            const auto& t = trains[x];
+            for(auto y = std::max(t.pos - t.len, 0); y < std::min(t.pos, (int)scr.height()); ++y)
                 scr.putPixel(x, y);
         }
         draw(d, scr);
