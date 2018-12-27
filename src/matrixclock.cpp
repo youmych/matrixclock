@@ -559,41 +559,41 @@ public:
         return Point(x() / k, y() / k);
     }
 
-    Point& operator+=(const Point& t) { 
+    Point& operator+=(const Point& t) {
         px += t.x();
         py += t.y();
         return *this;
-    }    
+    }
 
-    Point& operator-=(const Point& t) { 
+    Point& operator-=(const Point& t) {
         px -= t.x();
         py -= t.y();
         return *this;
-    }    
+    }
 
-    Point& operator*=(int k) { 
+    Point& operator*=(int k) {
         px *= k;
         py *= k;
         return *this;
-    }    
+    }
 
-    Point& operator/=(int k) { 
+    Point& operator/=(int k) {
         px /= k;
         py /= k;
         return *this;
-    }  
+    }
 
-    Point& operator*=(double k) { 
+    Point& operator*=(double k) {
         px *= k;
         py *= k;
         return *this;
-    }    
+    }
 
-    Point& operator/=(double k) { 
+    Point& operator/=(double k) {
         px /= k;
         py /= k;
         return *this;
-    }   
+    }
 
 };
 
@@ -669,23 +669,23 @@ int main(int argc, char *argv[])
     while(--n) {
         scr.clear();
         for(unsigned y = 0; y < scr.height(); ++y) {
-            for(auto x = trains[y].pos; x < trains[y].pos + trains[y].len; ++x)
+            const auto& t = trains[y];
+            for(auto x = std::max(t.pos - t.len, 0); x < std::min(t.pos, (int)scr.width()); ++x)
                 scr.putPixel(x, y);
         }
         draw(d, scr);
 
         std::transform(trains.begin(), trains.end(), trains.begin(), [&](train t){
             t.pos += t.speed;
-            if( t.pos > scr.width() ) {
-                std::cout << "pos=" << t.pos << ", w=" << scr.width() << std::endl;
+            if( t.pos - t.len > (int)scr.width() ) {
                 auto l = distL(rd);
-                return train(l, -l, distS(rd));
+                return train(l, 0, distS(rd));
             }
             return t;
         });
-        std::copy(trains.begin(), trains.end(), std::ostream_iterator<train>(std::cout, " "));
+//        std::copy(trains.begin(), trains.end(), std::ostream_iterator<train>(std::cout, " "));
         std::cout << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     return 0;
